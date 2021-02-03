@@ -21,6 +21,5 @@ def extract(directory):
 def main():
     fire.Fire(extract)
 
-
 if __name__ == '__main__':
     main()

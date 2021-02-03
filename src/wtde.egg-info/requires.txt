@@ -1,8 +1,10 @@
 fire
-jupyter
 matplotlib
 numpy
 opencv-python
 pandas
 pillow
 pytesseract
+
+[jupyter]
+jupyter

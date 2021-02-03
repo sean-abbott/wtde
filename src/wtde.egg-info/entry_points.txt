@@ -1,0 +1,3 @@
+[console_scripts]
+wtde = wtde.extract_mission:main
+
