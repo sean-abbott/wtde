@@ -16,6 +16,9 @@ TEMPLATE_PATHS = {
     'naval_mode': 'template_images/NavalMatch.png'
 }
 
+# I will likely have to play with this.
+TEMPLATE_MATCH_THRESHOLD = 60000000
+
 TEMPLATE_DIR = 'template_images'
 
 GAMECATEGORY = Enum('GAMECATEGORY', 'ground air naval')
@@ -224,8 +227,43 @@ def template_match(pil_img, template_path):
     template = cv2.imread(template_path,0)
     imcv = np.asarray(pil_img.convert('L'))
     result = cv2.matchTemplate(imcv,template,cv2.TM_CCOEFF)
-    return cv2.minMaxLoc(result)
+    min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
+    if max_val > TEMPLATE_MATCH_THRESHOLD:
+        return True
 
+    return False
+
+def debug_display_template(template_path):
+    """import pil_img and call show
+
+    Positional Arguments:
+    template_path -- path for the template to show
+    """
+    im = Image.open(template_path)
+    im.show()
+
+
+def debug_display_template_match_box(img, template_path):
+    """Intended for use with jupyter. Display the header with a box around the naval indication image
+
+    Positional Arguments:
+    header_img -- battle result header image in PIL format
+
+    Returns:
+    n/a
+
+    Error:
+    will just blow up
+    """
+    min_val, max_val, min_loc, max_loc = template_match(img, template_path)
+    template = cv2.imread(template_path,0)
+    w, h = template.shape[::-1]
+    top_left = max_loc
+    bottom_right = (top_left[0] + w, top_left[1] + h)
+    img = convert_pil_to_cv2(img)
+    img = cv2.rectangle(img,top_left, bottom_right, 255, 2)
+    pil_img = convert_cv2_to_pil(img)
+    pil_img.show()
 
 def convert_cv2_to_pil(cv_img):
     """Convert a cv2 image back to pil, to be human visible
@@ -252,24 +290,6 @@ def convert_pil_to_cv2(pil_img):
     """
     return np.asarray(pil_img.copy().convert('L'))
 
-def debug_display_header_with_naval(header_img):
-    """Intended for use with jupyter. Display the header with a box around the naval indication image
-
-    Positional Arguments:
-    header_img -- battle result header image in PIL format
-
-    Returns:
-    n/a
-
-    Error:
-    will just blow up
-    """
-    top_left, bottom_right = header_is_naval_by_template(header_img)
-    img = convert_pil_to_cv2(header_img)
-    img = cv2.rectangle(img,top_left, bottom_right, 255, 2)
-    pil_img = convert_cv2_to_pil(img)
-    pil_img.show()
-
 def find_stats_screen(image_list, category):
     """Identify the statistic page image from a list of PIL images
 
@@ -284,9 +304,15 @@ def find_stats_screen(image_list, category):
     Will raise a value error if a statistics page cannot be found
     """
     # TODO finish this
-    template = STATS_TEMPLATES[category]
+    template = STATS_TEMPLATES[GAMECATEGORY[category]]
     for image in image_list:
-        print(template_match(image, template))
+        #print(template_match(image, template))
+        #debug_display_template_match_box(image, template)
+        #input('press enter for next')
+        if template_match(image, template):
+            return image
+
+    raise ValueError('Could not find a match for the given template in the images')
 
 
 def validate_input(directory):
@@ -308,7 +334,7 @@ def validate_input(directory):
 
     # more checks could go here, but wait to do them until we actually have issues
     if not len(files) == 3:
-        raise ValueErorr('There was an incorrect number of files in directory {}'.format(directory))
+        raise ValueError('There was an incorrect number of files in directory {}'.format(directory))
 
     images = []
 

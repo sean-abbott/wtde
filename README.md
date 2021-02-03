@@ -1,4 +1,4 @@
-# Installation and runnign
+# Installation and running
 (Note it doesn't work right now)
 You can use pip to install it (or pipx if you wanted it on your path), i.e., `pip install .`
 You can then run `wtde` and what works, work.
