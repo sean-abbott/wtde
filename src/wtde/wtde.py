@@ -19,6 +19,8 @@ TEMPLATE_PATHS = {
     'naval_stats': os.path.join(TEMPLATE_DIR, 'naval_stats.png'),
     'ground_stats': os.path.join(TEMPLATE_DIR, 'ground_stats.png'),
     'air_stats': os.path.join(TEMPLATE_DIR, 'air_stats.png'),
+    'battle_message_won_badge': os.path.join(TEMPLATE_DIR, 'battle_message_screen_won.png'),
+    'battle_message_lost_badge': os.path.join(TEMPLATE_DIR, 'battle_message_screen_lost.png'),
 }
 
 # These are likely to need tweaking
@@ -28,6 +30,8 @@ TEMPLATE_THRESHOLDS = {
     'naval_stats': 60000000,
     'air_stats': 60000000,
     'ground_stats': 60000000,
+    'battle_message_won_badge': 15000000,
+    'battle_message_lost_badge': 15000000,
 }
 
 GAMECATEGORY = Enum('GAMECATEGORY', 'ground air naval')
@@ -225,7 +229,7 @@ def mask_naval_symbol(img):
 
     return convert_cv2_to_pil(new_cv_img)
 
-def template_match(pil_img, template_name):
+def template_match(pil_img, template_name, debug=False):
     """Return True if a match was found
 
     Positional Arguments:
@@ -243,8 +247,8 @@ def template_match(pil_img, template_name):
     imcv = np.asarray(pil_img.convert('L'))
     result = cv2.matchTemplate(imcv,template,cv2.TM_CCOEFF)
 
-    # TODO uncomment this for debugging use
-    #return cv2.minMaxLoc(result)
+    if debug:
+        return cv2.minMaxLoc(result)
 
     min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
     if max_val > TEMPLATE_THRESHOLDS[template_name]:
@@ -274,7 +278,7 @@ def debug_display_template_match_box(img, template_name):
     Error:
     will just blow up
     """
-    min_val, max_val, min_loc, max_loc = template_match(img, template_name)
+    min_val, max_val, min_loc, max_loc = template_match(img, template_name, debug=True)
     template = cv2.imread(TEMPLATE_PATHS[template_name],0)
     w, h = template.shape[::-1]
     top_left = max_loc
@@ -353,6 +357,28 @@ def find_results_screen(image_list):
         #input('press enter for next')
         if template_match(image, 'results_badge'):
             return image
+
+    raise ValueError('Could not find a match for the given template in the images')
+
+def find_battle_message_screen(image_list):
+    """Identify and return the battle message image from a list of images
+
+    Positional Arguments:
+    image_list -- a list of PIL images, probably ~3 of them
+
+    Returns:
+    A single PIL image representing the battle_message page
+
+    Exceptions:
+    Will raise a value error if it doesn't find the battle message image
+    """
+    template_names = ['battle_message_won_badge', 'battle_message_lost_badge']
+    for image in image_list:
+        for template_name in template_names:
+          #debug_display_template_match_box(image, template_name)
+          #input('press enter for next')
+          if template_match(image, template_name):
+              return image
 
     raise ValueError('Could not find a match for the given template in the images')
 
