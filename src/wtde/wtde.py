@@ -18,6 +18,7 @@ TEMPLATE_PATHS = {
 
 # I will likely have to play with this.
 TEMPLATE_MATCH_THRESHOLD = 60000000
+NAVAL_SYMBOL_MATCH_THRESHOLD = 5000000
 
 TEMPLATE_DIR = 'template_images'
 
@@ -51,15 +52,16 @@ def base_image(path, dualscreen=IS_DUALSCREEN):
 
     return im.crop((0, 0, im.width/2, im.height))
 
-def header_image(img):
+def header_image(img, category):
     """Returns the header portion of an image
 
     Postional Arguments:
     img -- fullscreen PIL image of either the "my results" screen or the "statisics" screen
+    category -- GAMECATORY. If naval extra steps are needed
 
     Returns:
     A PIL image of just the header section of the image
-Error:
+    Error:
     Doesn't check anything, will raise errors on incorrect inputs
     """
 
@@ -67,7 +69,12 @@ Error:
     # TODO make the lower y bound (box[3]) a ratio as well.
     box = (img.width/3, 0, img.width-(img.width/3), 170)
 
-    return img.crop(box)
+    cropped_image = img.crop(box)
+    # This is dumb. I don't know why enumerations are failing
+    if category.name == GAMECATEGORY.naval.name:
+        cropped_image = mask_naval_symbol(cropped_image)
+
+    return cropped_image
 
 def header_image_to_text(img):
     """Returns the header text from a given (header) img
@@ -116,7 +123,7 @@ def map_type(s):
     Error:
     Does not catch regex errors if the regex isn't matched
     """
-    return re.search('\[([^\]]*)\]', s).group(1)
+    return re.search('\[([^\]]*)\]', s).group(1).strip()
 
 def map_name(s):
     """Take header string and return a map name
@@ -130,7 +137,7 @@ def map_name(s):
     Error:
     Does not catch regex errors if the regex isn't matched
     """
-    return re.search('\] ([^\n]*)\n', s).group(1)
+    return re.search('\] ([^\n]*)\n', s).group(1).strip()
 
 def w_or_l(s):
     """Take header string and return win or lose indicator
@@ -147,7 +154,7 @@ def w_or_l(s):
     """
     if 'Failed' in s:
         return 'L'
-    elif 'Success' in s:
+    elif 'Accomplished' in s:
         return 'W'
     else:
         raise ValueError("Could not find an victory indication in the given string")
@@ -183,7 +190,7 @@ def get_naval_mode_template(path=TEMPLATE_PATHS['naval_mode']):
     """
     return cv2.imread(path, 0)
 
-def header_is_naval_by_template(img):
+def mask_naval_symbol(img):
     """Return the coordinates of the naval image if it exists, or (-1, -1, -1, -1)
 
     Positional arguments:
@@ -197,19 +204,25 @@ def header_is_naval_by_template(img):
     """
     template = get_naval_mode_template()
     w, h = template.shape[::-1]
-    imcv = np.asarray(img.convert('L'))
+    imcv = convert_pil_to_cv2(img)
 
-    try:
-        result = cv2.matchTemplate(imcv,template,cv2.TM_CCOEFF)
-    # TODO actually catch the failing error or check for failing condition
-    except Error as e:
-        print('If this was a "not found" error, we should instead return ((-1, -1), (-1, -1))')
-        raise e
+    result = cv2.matchTemplate(imcv,template,cv2.TM_CCOEFF)
 
     min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
+    if max_val < NAVAL_SYMBOL_MATCH_THRESHOLD:
+        print(min_val, max_val, min_loc, max_loc)
+        raise ValueError('Could not find naval template in image')
     top_left = max_loc
     bottom_right = (top_left[0] + w, top_left[1] + h)
-    return (top_left, bottom_right)
+    color = int(imcv[0][0])
+    #color = int(imcv.mean())
+
+    # use the average color of the header to try and approximate the background
+    #new_cv_img = cv2.rectangle(imcv,top_left, bottom_right, int(imcv.mean()), -1)
+    print(type(color))
+    new_cv_img = cv2.rectangle(imcv,top_left, bottom_right, color, -1)
+
+    return convert_cv2_to_pil(new_cv_img)
 
 def template_match(pil_img, template_path):
     """Return True if a match was found
@@ -295,7 +308,7 @@ def find_stats_screen(image_list, category):
 
     Positional Arguments:
     image_list -- a list of PIL images. Should be 3 of them.
-    category -- GAMECATEGORY describing whch category of game (air, ground, naval)
+    category -- string describing whch category of game (air, ground, naval)
 
     Returns:
     A single PIL image representing the statistic page
