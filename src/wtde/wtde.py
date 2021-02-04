@@ -12,23 +12,25 @@ from PIL import Image
 
 IS_DUALSCREEN = True
 
+TEMPLATE_DIR = 'template_images'
 TEMPLATE_PATHS = {
-    'naval_mode': 'template_images/NavalMatch.png'
+    'naval_mode': os.path.join(TEMPLATE_DIR, 'NavalMatch.png'),
+    'results_badge': os.path.join(TEMPLATE_DIR, 'results_screen.png'),
+    'naval_stats': os.path.join(TEMPLATE_DIR, 'naval_stats.png'),
+    'ground_stats': os.path.join(TEMPLATE_DIR, 'ground_stats.png'),
+    'air_stats': os.path.join(TEMPLATE_DIR, 'air_stats.png'),
 }
 
-# I will likely have to play with this.
-TEMPLATE_MATCH_THRESHOLD = 60000000
-NAVAL_SYMBOL_MATCH_THRESHOLD = 5000000
-
-TEMPLATE_DIR = 'template_images'
+# These are likely to need tweaking
+TEMPLATE_THRESHOLDS = {
+    'results_badge': 40000000,
+    'naval_mode': 5000000,
+    'naval_stats': 60000000,
+    'air_stats': 60000000,
+    'ground_stats': 60000000,
+}
 
 GAMECATEGORY = Enum('GAMECATEGORY', 'ground air naval')
-
-STATS_TEMPLATES = {
-    GAMECATEGORY.ground: os.path.join(TEMPLATE_DIR, 'ground_stats.png'),
-    GAMECATEGORY.air: os.path.join(TEMPLATE_DIR, 'air_stats.png'),
-    GAMECATEGORY.naval: os.path.join(TEMPLATE_DIR, 'naval_stats.png'),
-}
 
 
 def base_image(path, dualscreen=IS_DUALSCREEN):
@@ -209,22 +211,21 @@ def mask_naval_symbol(img):
     result = cv2.matchTemplate(imcv,template,cv2.TM_CCOEFF)
 
     min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
-    if max_val < NAVAL_SYMBOL_MATCH_THRESHOLD:
+    if max_val < TEMPLATE_THRESHOLDS['naval_mode']:
         print(min_val, max_val, min_loc, max_loc)
         raise ValueError('Could not find naval template in image')
     top_left = max_loc
     bottom_right = (top_left[0] + w, top_left[1] + h)
-    color = int(imcv[0][0])
-    #color = int(imcv.mean())
-
+    # Not sure if one color or the other is better here, but so far all is working
+    #color = int(imcv[0][0])
     # use the average color of the header to try and approximate the background
-    #new_cv_img = cv2.rectangle(imcv,top_left, bottom_right, int(imcv.mean()), -1)
-    print(type(color))
+    color = int(imcv.mean())
+
     new_cv_img = cv2.rectangle(imcv,top_left, bottom_right, color, -1)
 
     return convert_cv2_to_pil(new_cv_img)
 
-def template_match(pil_img, template_path):
+def template_match(pil_img, template_name):
     """Return True if a match was found
 
     Positional Arguments:
@@ -237,11 +238,16 @@ def template_match(pil_img, template_path):
     Error:
     Does not handle errors
     """
+    template_path = TEMPLATE_PATHS[template_name]
     template = cv2.imread(template_path,0)
     imcv = np.asarray(pil_img.convert('L'))
     result = cv2.matchTemplate(imcv,template,cv2.TM_CCOEFF)
+
+    # TODO uncomment this for debugging use
+    #return cv2.minMaxLoc(result)
+
     min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
-    if max_val > TEMPLATE_MATCH_THRESHOLD:
+    if max_val > TEMPLATE_THRESHOLDS[template_name]:
         return True
 
     return False
@@ -256,7 +262,7 @@ def debug_display_template(template_path):
     im.show()
 
 
-def debug_display_template_match_box(img, template_path):
+def debug_display_template_match_box(img, template_name):
     """Intended for use with jupyter. Display the header with a box around the naval indication image
 
     Positional Arguments:
@@ -268,14 +274,15 @@ def debug_display_template_match_box(img, template_path):
     Error:
     will just blow up
     """
-    min_val, max_val, min_loc, max_loc = template_match(img, template_path)
-    template = cv2.imread(template_path,0)
+    min_val, max_val, min_loc, max_loc = template_match(img, template_name)
+    template = cv2.imread(TEMPLATE_PATHS[template_name],0)
     w, h = template.shape[::-1]
     top_left = max_loc
     bottom_right = (top_left[0] + w, top_left[1] + h)
     img = convert_pil_to_cv2(img)
     img = cv2.rectangle(img,top_left, bottom_right, 255, 2)
     pil_img = convert_cv2_to_pil(img)
+    print(max_val)
     pil_img.show()
 
 def convert_cv2_to_pil(cv_img):
@@ -317,12 +324,34 @@ def find_stats_screen(image_list, category):
     Will raise a value error if a statistics page cannot be found
     """
     # TODO finish this
-    template = STATS_TEMPLATES[GAMECATEGORY[category]]
+    template_name = "{}_stats".format(GAMECATEGORY[category].name)
     for image in image_list:
         #print(template_match(image, template))
         #debug_display_template_match_box(image, template)
         #input('press enter for next')
-        if template_match(image, template):
+        if template_match(image, template_name):
+            return image
+
+    raise ValueError('Could not find a match for the given template in the images')
+
+# TODO merge this with the other find, it's the same method
+def find_results_screen(image_list):
+    """Identify and return the results image from a list of images
+
+    Positional Arguments:
+    image_list -- a list of PIL images, probably ~3 of them
+
+    Returns:
+    A single PIL image representing the results page
+
+    Exceptions:
+    Will raise a value error if it doesn't find the results image
+    """
+    for image in image_list:
+        #print(template_match(image, template))
+        #debug_display_template_match_box(image, template)
+        #input('press enter for next')
+        if template_match(image, 'results_badge'):
             return image
 
     raise ValueError('Could not find a match for the given template in the images')
