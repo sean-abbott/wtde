@@ -314,6 +314,27 @@ def find_stats_screen(image_list, category):
 
     raise ValueError('Could not find a match for the given template in the images')
 
+def determine_category(image_list):
+    """Check for the stats screen from each category. Return the category that matches
+
+    Positional Arguments:
+    image_list -- the list of PIL images
+
+    Returns:
+    GAMECATEGORY of the matching image
+
+    Exceptions:
+    Will raise a value error if none of the images match
+    """
+    # TODO this is inefficient and will lead to many duplicated matches.
+    # Later perhaps we can create a struct to hold values so we do not repeat
+    for cat in GAMECATEGORY:
+        try:
+            find_stats_screen(image_list, cat.name)
+            return cat
+        except ValueError:
+            pass
+
 
 def validate_input(directory):
     """Return a list with 3 base images
