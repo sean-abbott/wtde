@@ -434,3 +434,15 @@ def validate_input(directory):
         raise ValueError('Could not process the files in {}. Are they images?'.format(directory))
 
     return images
+
+def handle_ready_files(ready_dir):
+    """Process files in a changed directory
+
+    Positional Arugments:
+    ready_dir -- a (validated) ReadyDir with a list of files to process
+
+    Error:
+    Should only log errors, never raise them
+    """
+    # TODO obviously a placeholder
+    print(ready_dir.files)

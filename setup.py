@@ -34,7 +34,9 @@ setup(
         'opencv-python',
         'pandas',
         'pillow',
-        'pytesseract'
+        'pytesseract',
+        'result',
+        'watchdog'
     ],
 
     extras_require = {

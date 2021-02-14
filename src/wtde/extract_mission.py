@@ -1,5 +1,31 @@
+import time
+
 import fire
 import wtde
+from wtde import EventHandler
+
+from watchdog.observers import Observer
+
+def watch(directory):
+    """Watch a directory and process files going into it"""
+    observer = Observer()
+    handler = EventHandler(directory)
+
+    print("Starting watch...")
+    observer.schedule(handler, directory, recursive=False)
+    observer.start()
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print('Stopping directory watch as requested...')
+        observer.stop()
+        observer.join()
+    finally:
+        if observer.is_alive():
+            print('Stopping directory watch on unexpected event...')
+            observer.stop()
+            observer.join()
 
 def extract(directory):
     image_list = wtde.validate_input(directory)
@@ -25,7 +51,7 @@ def extract(directory):
     print(mission_results)
 
 def main():
-    fire.Fire(extract)
+    fire.Fire()
 
 if __name__ == '__main__':
     main()
