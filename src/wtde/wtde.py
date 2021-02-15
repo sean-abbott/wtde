@@ -1,14 +1,18 @@
 import os
 import re
+import shutil
 
+from datetime import datetime as dt
 from enum import Enum
+from typing import NamedTuple
 
 import cv2
 import numpy as np
 import pytesseract
 
 from matplotlib import pyplot as plt
-from PIL import Image
+from result import Ok, Err
+from PIL import Image, UnidentifiedImageError
 
 IS_DUALSCREEN = True
 
@@ -35,6 +39,65 @@ TEMPLATE_THRESHOLDS = {
 }
 
 GAMECATEGORY = Enum('GAMECATEGORY', 'ground air naval')
+
+class ResultSet(NamedTuple):
+    """Ongoing results built over the chain"""
+    src_dir: str # the directory from which the images comes
+    archive_dir: str # the top directory into which the images go when archive
+    error_dir: str # the top directory into which errored sets go
+    set_dir: str # the sub-directory under archive_dir or error_dir which this set goes in
+    image_list: list # the list of PIL images we work with
+    file_list: list # list of file(names/paths) we're working with
+    stats_image: Image.Image # the PIL.image representing the stats page
+    results_image: Image.Image # the PIL.image representing the results page
+    battle_message_image: Image.Image # the PIL.image representing the battle messages page
+    category: GAMECATEGORY # the category the of the mission
+    game_map: str # the map name
+    dt: str # TODO make datetime the date and approximate time of the mission
+
+# TODO this is ugly AF. Find a better way
+def update_result(
+        r=None,
+        src_dir=None,
+        archive_dir=None,
+        error_dir=None,
+        set_dir=None,
+        image_list=None,
+        file_list=None,
+        stats_image=None,
+        results_image=None,
+        battle_message_image=None,
+        category=None,
+        game_map=None,
+        dt=None
+):
+    if r is None:
+        r = ResultSet(
+           src_dir=None,
+           archive_dir=None,
+           error_dir=None,
+           set_dir=None,
+           image_list=None,
+           file_list=None,
+           stats_image=None,
+           results_image=None,
+           battle_message_image=None,
+           category=None,
+           game_map=None,
+           dt=None)
+    return ResultSet(
+        src_dir = src_dir or r.src_dir,
+        archive_dir = archive_dir or r.archive_dir,
+        error_dir = error_dir or r.error_dir,
+        set_dir = set_dir or r.set_dir,
+        image_list = image_list or r.image_list,
+        file_list = file_list or r.file_list,
+        stats_image = stats_image or r.stats_image,
+        results_image = results_image or r.results_image,
+        battle_message_image = battle_message_image or r.battle_message_image,
+        category = category or r.category,
+        game_map = game_map or r.game_map,
+        dt = dt or r.dt)
 
 
 def base_image(path, dualscreen=IS_DUALSCREEN):
@@ -328,7 +391,8 @@ def find_stats_screen(image_list, category):
     Will raise a value error if a statistics page cannot be found
     """
     # TODO finish this
-    template_name = "{}_stats".format(GAMECATEGORY[category].name)
+    #template_name = "{}_stats".format(GAMECATEGORY[category].name)
+    template_name = "{}_stats".format(category.name)
     for image in image_list:
         #print(template_match(image, template))
         #debug_display_template_match_box(image, template)
@@ -394,18 +458,22 @@ def determine_category(image_list):
     Exceptions:
     Will raise a value error if none of the images match
     """
-    # TODO this is inefficient and will lead to many duplicated matches.
+    # TODO this is inefficient and will lead to many duplicated calls.
     # Later perhaps we can create a struct to hold values so we do not repeat
     for cat in GAMECATEGORY:
         try:
-            find_stats_screen(image_list, cat.name)
+            find_stats_screen(image_list, cat)
             return cat
         except ValueError:
             pass
 
 
+# TODO refactor. merge with EventHander._ready
+# TODO refactor to use Result (Ok, Err)
 def validate_input(directory):
     """Return a list with 3 base images
+
+    This method should be 
 
     Positional Arguments:
     directory -- a directory to check for input files
@@ -422,6 +490,7 @@ def validate_input(directory):
         raise ValueError('Could not get a list of files from {}'.format(directory))
 
     # more checks could go here, but wait to do them until we actually have issues
+    # TODO this should not be exactly 3 anymore
     if not len(files) == 3:
         raise ValueError('There was an incorrect number of files in directory {}'.format(directory))
 
@@ -444,5 +513,183 @@ def handle_ready_files(ready_dir):
     Error:
     Should only log errors, never raise them
     """
-    # TODO obviously a placeholder
-    print(ready_dir.files)
+    worked = (init_result_set(ready_dir)
+        .map_or_else(lambda x: archive_err(ready_dir, x), lambda x: get_images_list(x))
+        .map_or_else(lambda x: archive_err(ready_dir, x), lambda x: get_result_set(x))
+        .map_or_else(lambda x: archive_err(ready_dir, x), lambda x: archive_set(x)))
+
+    if worked.is_ok():
+        print('done')
+        return
+
+    else:
+        print('Something when wrong: {}'.format(worked.value))
+        return
+
+#
+#    # TODO properly chain these
+#    r = get_images_list(r.value)
+#    if r.is_ok():
+#        r = get_result_set(r.value)
+#        r.map_or_else(lambda x: archive_error(ready_dir, x), lambda x: archive_set(x))
+#        print('Done! Ready for more.')
+#        return
+#
+#    archive_error(ready_dir)
+
+    # TODO this is the goal, I guess?
+    #res = get_images_from_ready(ready_dir)
+    #    .map_or_else(lambda x: archive_err(x), lambda x: get_result_set(x))
+    #    .map_or_else(lambda x: archive_err(x), lambda x: archive_set(x))
+
+def init_result_set(ready_dir):
+    """Convert the ReadyDir into a partially populated ResultSet
+
+    Positional Arguments:
+    ready_dir -- a (validated) ReadyDir with a list of files to process
+
+    Returns:
+    Ok or Err -- an Ok wrapping ResultSet with src_dir,archive_ir,error_dir,file_list,dt set, or Err
+
+    Errors:
+    Anything unexpected will raise
+    """
+    r = None
+    try:
+        first_file = os.path.join(ready_dir.directory, ready_dir.files[0])
+        set_dt = dt.fromtimestamp(os.stat(first_file).st_mtime).strftime('%Y%m%d%H%M')
+        r = update_result(
+            src_dir=ready_dir.directory,
+            archive_dir=ready_dir.archive_dir,
+            error_dir=ready_dir.error_dir,
+            file_list=ready_dir.files,
+            dt=set_dt)
+    except Exception as e:
+        return Err(e)
+
+    if r is not None:
+        return Ok(r)
+    return Err('Something went wrong and we did not create a ResultSet in init_result_set')
+
+def get_images_list(r):
+    """Return a list of images from all the files in the ready directory
+
+    Positional Arguments:
+    r -- A ResultSet within
+
+    Returns:
+    Result -- An Ok wrapper for a ResultSet includng the image list, or an Err
+
+    Error:
+    Return an Err for error processing
+    """
+    images = []
+    non_image_files = []
+    for file in r.file_list:
+        try:
+            images.append(base_image(os.path.join(r.src_dir, file)))
+        except UnidentifiedImageError:
+            non_image_files.append(file)
+
+    if len(images) >= 3:
+        r = update_result(r=r, image_list=images)
+        return Ok(r)
+
+    return Err(non_image_files)
+
+def get_result_set(r):
+    """Given a result set, update it with the 3 image types
+
+    Positional Arguments:
+    r -- a ResultSet
+
+    Returns
+    A result set with stats_image, battle_message_image, and results_image set, or an Err if there are errors
+
+    Errors:
+    handled Errors will lead to an Err
+    """
+    print("Finding stats, results, and battles messages...")
+    try:
+        category = determine_category(r.image_list)
+        stats_image = find_stats_screen(r.image_list, category)
+        results_image = find_results_screen(r.image_list)
+        battle_message_image = find_battle_message_screen(r.image_list)
+        header_img = header_image(stats_image, category)
+        header_str = header_image_to_text(header_img)
+        r = update_result(
+            r=r,
+            stats_image=stats_image,
+            results_image=results_image,
+            battle_message_image=battle_message_image,
+            category=category,
+            game_map=map_name(header_str))
+        print('Done!')
+        return Ok(r)
+    except Exception as e:
+        print('Failed to get the image results: {}'.format(e))
+        return Err(e)
+
+# TODO also rename files to match their type
+# will require we store  the <type>_image as a struct of its own
+def archive_set(result_set):
+    """Move the files in the result set from their directory to a new subfolder in archive_dir
+
+    Postiional Arguments:
+    result_set -- ResultSet that MUST have set_dir, archive_dir, category, game_map, and dt actually set
+
+    Error:
+    will raise any errors
+    """
+    print('Archiving results!')
+    set_name = dir_name_normalize('{}-{}-{}'.format(result_set.dt, result_set.category.name, result_set.game_map))
+    set_dir = result_set.set_dir or os.path.join(
+            result_set.archive_dir,
+            set_name)
+    print(set_dir)
+    try:
+        os.makedirs(set_dir)
+    except FileExistsError:
+        pass
+    for file in result_set.file_list:
+            src = os.path.join(result_set.src_dir, file)
+            dest = os.path.join(set_dir, file)
+            print('moving {} to {}'.format(src, dest))
+            shutil.move(src, dest)
+    return Ok()
+
+def dir_name_normalize(s):
+    """Remove special characters and downcase directory name
+
+    Positional Arguments:
+    s -- string with the expected directory name
+
+    Returns
+    a string with no spaces, special characters, and downcased
+    """
+    # This will probably get more complicated
+    return s.lower().replace(' ', '_')
+
+def archive_error(ready_dir, err):
+    """Archives all the files of ready_dir to an error directory
+
+    Positional Arguments:
+    ready_dir -- A ReadyDir named tuple
+    err -- a result with an error, so we can print
+
+    Errors:
+    will raise any errors
+    """
+    print('archive_error called because {}'.format(err.value))
+    first_file = os.path.join(ready_dir.directory, ready_dir.files[0])
+
+    approx_time = dt.fromtimestamp(os.stat(first_file).st_mtime).strftime('%Y%m%d%H%M')
+    set_dir = os.path.join(ready_dir.error_dir, approx_time)
+    try:
+        os.makedirs(set_dir)
+    except FileExistsError:
+        pass
+    for file in ready_dir.files:
+        src = os.path.join(ready_dir.directory, file)
+        dest = os.path.join(set_dir, file)
+        shutil.move(src, dest)

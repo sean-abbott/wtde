@@ -6,13 +6,13 @@ from wtde import EventHandler
 
 from watchdog.observers import Observer
 
-def watch(directory):
+def watch(watch_dir='/tmp/wt_screens', archive_dir='/tmp/wt_archive', error_dir='/tmp/wt_archive/errors'):
     """Watch a directory and process files going into it"""
     observer = Observer()
-    handler = EventHandler(directory)
+    handler = EventHandler(watch_dir)
 
-    print("Starting watch...")
-    observer.schedule(handler, directory, recursive=False)
+    print('Starting watch on {}, archive to {}, errors to {}'.format(watch_dir, archive_dir, error_dir))
+    observer.schedule(handler, watch_dir, recursive=False)
     observer.start()
     try:
         while True:
