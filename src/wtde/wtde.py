@@ -1,6 +1,7 @@
 import os
 import re
 import shutil
+import time
 
 from datetime import datetime as dt
 from enum import Enum
@@ -473,8 +474,6 @@ def determine_category(image_list):
 def validate_input(directory):
     """Return a list with 3 base images
 
-    This method should be 
-
     Positional Arguments:
     directory -- a directory to check for input files
 
@@ -513,6 +512,9 @@ def handle_ready_files(ready_dir):
     Error:
     Should only log errors, never raise them
     """
+    # I really wanted this to be railway oriented. I may try and write a context manager
+    # or something to basically do a binding call here
+    # TODO soon the failure path on this is broken, it doesn't take a lambda here
     worked = (init_result_set(ready_dir)
         .map_or_else(lambda x: archive_err(ready_dir, x), lambda x: get_images_list(x))
         .map_or_else(lambda x: archive_err(ready_dir, x), lambda x: get_result_set(x))
@@ -525,22 +527,6 @@ def handle_ready_files(ready_dir):
     else:
         print('Something when wrong: {}'.format(worked.value))
         return
-
-#
-#    # TODO properly chain these
-#    r = get_images_list(r.value)
-#    if r.is_ok():
-#        r = get_result_set(r.value)
-#        r.map_or_else(lambda x: archive_error(ready_dir, x), lambda x: archive_set(x))
-#        print('Done! Ready for more.')
-#        return
-#
-#    archive_error(ready_dir)
-
-    # TODO this is the goal, I guess?
-    #res = get_images_from_ready(ready_dir)
-    #    .map_or_else(lambda x: archive_err(x), lambda x: get_result_set(x))
-    #    .map_or_else(lambda x: archive_err(x), lambda x: archive_set(x))
 
 def init_result_set(ready_dir):
     """Convert the ReadyDir into a partially populated ResultSet
@@ -571,6 +557,38 @@ def init_result_set(ready_dir):
         return Ok(r)
     return Err('Something went wrong and we did not create a ResultSet in init_result_set')
 
+def retryable_get_base_image(path, retry_count=3, sleep_base=2):
+    """Try to load an image from a file several times, retying if it seems the image is not ready
+
+    Positional Arguments
+    path -- path to the file to try to open
+
+    Keyword Arguments
+    retry_count -- how many times to retry, default=3
+    sleep_base -- how many seconds to sleep after the first attempt, doubled each time. Default 2
+
+    Returns:
+    PIL Image loaded from the path
+
+    Errors:
+    Anything that we do not expect
+    """
+    count = 0
+    image = None
+    sleep = sleep_base
+    while count < retry_count:
+        try:
+            image = base_image(path)
+        except OSError as e:
+            err_msg = str(e)
+            if "image file is truncated" not in err_msg:
+                raise e
+        if image is not None:
+            return image
+        time.sleep(sleep)
+        count += 1
+        sleep *= 2
+
 def get_images_list(r):
     """Return a list of images from all the files in the ready directory
 
@@ -587,7 +605,7 @@ def get_images_list(r):
     non_image_files = []
     for file in r.file_list:
         try:
-            images.append(base_image(os.path.join(r.src_dir, file)))
+            images.append(retryable_get_base_image(os.path.join(r.src_dir, file)))
         except UnidentifiedImageError:
             non_image_files.append(file)
 
