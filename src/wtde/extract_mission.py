@@ -9,7 +9,7 @@ from watchdog.observers import Observer
 def watch(watch_dir='/tmp/wt_screens', archive_dir='/tmp/wt_archive', error_dir='/tmp/wt_archive/errors'):
     """Watch a directory and process files going into it"""
     observer = Observer()
-    handler = EventHandler(watch_dir)
+    handler = EventHandler(watch_dir, archive_dir=archive_dir, error_dir=error_dir)
 
     print('Starting watch on {}, archive to {}, errors to {}'.format(watch_dir, archive_dir, error_dir))
     observer.schedule(handler, watch_dir, recursive=False)

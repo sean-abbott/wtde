@@ -15,6 +15,8 @@ from matplotlib import pyplot as plt
 from result import Ok, Err
 from PIL import Image, UnidentifiedImageError
 
+from wtde import utils
+
 IS_DUALSCREEN = True
 
 TEMPLATE_DIR = 'template_images'
@@ -512,13 +514,12 @@ def handle_ready_files(ready_dir):
     Error:
     Should only log errors, never raise them
     """
-    # I really wanted this to be railway oriented. I may try and write a context manager
-    # or something to basically do a binding call here
-    # TODO soon the failure path on this is broken, it doesn't take a lambda here
-    worked = (init_result_set(ready_dir)
-        .map_or_else(lambda x: archive_err(ready_dir, x), lambda x: get_images_list(x))
-        .map_or_else(lambda x: archive_err(ready_dir, x), lambda x: get_result_set(x))
-        .map_or_else(lambda x: archive_err(ready_dir, x), lambda x: archive_set(x)))
+    worked = utils.railroad(
+        init_result_set,
+        get_images_list,
+        get_result_set,
+        archive_set,
+        init_arg=ready_dir)
 
     if worked.is_ok():
         print('done')
@@ -526,6 +527,7 @@ def handle_ready_files(ready_dir):
 
     else:
         print('Something when wrong: {}'.format(worked.value))
+        archive_err(ready_dir, worked)
         return
 
 def init_result_set(ready_dir):
