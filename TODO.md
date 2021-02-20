@@ -1,4 +1,6 @@
 # TODO
+* Need to get some images from an early ended mission so we can start figuring out how to stage those
+* Need to create a command to iterate through the error directories and try and re-do them
 * Need to figure out how to mask multiple versions of the same image (find multiple copies of a template)
 * Need to split out relevant sections like we did with the header section so it can be parsed
 * At which point we can start parsing data out of sections of the images
