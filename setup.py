@@ -34,6 +34,7 @@ setup(
         'opencv-python',
         'pandas',
         'pillow',
+        'psutil',
         'pytesseract',
         'result',
         'watchdog'

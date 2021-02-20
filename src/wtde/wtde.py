@@ -35,7 +35,7 @@ TEMPLATE_THRESHOLDS = {
     'results_badge': 40000000,
     'naval_mode': 5000000,
     'naval_stats': 60000000,
-    'air_stats': 60000000,
+    'air_stats': 50000000,
     'ground_stats': 60000000,
     'battle_message_won_badge': 15000000,
     'battle_message_lost_badge': 15000000,
@@ -143,7 +143,7 @@ def header_image(img, category):
 
     cropped_image = img.crop(box)
     # This is dumb. I don't know why enumerations are failing
-    if category.name == GAMECATEGORY.naval.name:
+    if category is GAMECATEGORY.naval:
         cropped_image = mask_naval_symbol(cropped_image)
 
     return cropped_image
@@ -322,14 +322,16 @@ def template_match(pil_img, template_name, debug=False):
 
     return False
 
-def debug_display_template(template_path):
+def debug_display_template(template_name):
     """import pil_img and call show
 
     Positional Arguments:
     template_path -- path for the template to show
     """
+    template_path = TEMPLATE_PATHS[template_name]
     im = Image.open(template_path)
     im.show()
+    input('press enter for next')
 
 
 def debug_display_template_match_box(img, template_name):
@@ -354,6 +356,7 @@ def debug_display_template_match_box(img, template_name):
     pil_img = convert_cv2_to_pil(img)
     print(max_val)
     pil_img.show()
+    input('press enter for next')
 
 def convert_cv2_to_pil(cv_img):
     """Convert a cv2 image back to pil, to be human visible
@@ -393,13 +396,10 @@ def find_stats_screen(image_list, category):
     Exceptions:
     Will raise a value error if a statistics page cannot be found
     """
-    # TODO finish this
-    #template_name = "{}_stats".format(GAMECATEGORY[category].name)
     template_name = "{}_stats".format(category.name)
     for image in image_list:
-        #print(template_match(image, template))
-        #debug_display_template_match_box(image, template)
-        #input('press enter for next')
+        #debug_display_template(template_name)
+        #debug_display_template_match_box(image, template_name)
         if template_match(image, template_name):
             return image
 
@@ -419,9 +419,6 @@ def find_results_screen(image_list):
     Will raise a value error if it doesn't find the results image
     """
     for image in image_list:
-        #print(template_match(image, template))
-        #debug_display_template_match_box(image, template)
-        #input('press enter for next')
         if template_match(image, 'results_badge'):
             return image
 
@@ -442,8 +439,6 @@ def find_battle_message_screen(image_list):
     template_names = ['battle_message_won_badge', 'battle_message_lost_badge']
     for image in image_list:
         for template_name in template_names:
-          #debug_display_template_match_box(image, template_name)
-          #input('press enter for next')
           if template_match(image, template_name):
               return image
 
@@ -469,6 +464,8 @@ def determine_category(image_list):
             return cat
         except ValueError:
             pass
+
+    raise ValueError("Could not determine game category from the given images")
 
 
 # TODO refactor. merge with EventHander._ready
@@ -527,7 +524,7 @@ def handle_ready_files(ready_dir):
 
     else:
         print('Something when wrong: {}'.format(worked.value))
-        archive_err(ready_dir, worked)
+        archive_error(ready_dir, worked)
         return
 
 def init_result_set(ready_dir):
@@ -713,3 +710,5 @@ def archive_error(ready_dir, err):
         src = os.path.join(ready_dir.directory, file)
         dest = os.path.join(set_dir, file)
         shutil.move(src, dest)
+    with open(os.path.join(set_dir, 'why'), 'w') as f:
+        f.write(str(err.value))

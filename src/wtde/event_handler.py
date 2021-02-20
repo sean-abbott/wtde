@@ -1,4 +1,5 @@
 import os
+import time
 
 import watchdog.events
 from result import Ok, Err
@@ -26,7 +27,12 @@ class EventHandler(watchdog.events.FileSystemEventHandler):
         """
         ready_dir = self._ready(event.src_path, self.watch_dir, self.archive_dir, self.error_dir)
         if ready_dir.is_ok():
-            wtde.handle_ready_files(ready_dir.value)
+            # screenshot takes some time to finish after the file is created
+            handle_free = wtde.utils.wait_for_no_handles(ready_dir.unwrap().files)
+            if handle_free.is_ok():
+                wtde.handle_ready_files(ready_dir.value)
+            else:
+                print(handle_free.unwrap())
             return
 
         print(ready_dir.value)
