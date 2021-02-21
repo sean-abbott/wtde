@@ -50,6 +50,17 @@ def extract(directory):
 
     print(mission_results)
 
+def retry(archive_dir='/tmp/wt_archive', error_dir='/tmp/wt_errors'):
+    """Iterate through error directories and re-attempt to import the files
+
+    Keyword Arguments:
+    archive_dir -- the directory to put any successful parses into
+    error_dir -- the top level directory to look for error archives. Expects subdirectories in the `archive_error` format
+                    (which is a date in YYYYMMDDHHMM format, each directory having 3 images in it)
+    """
+    wtde.retry_errors(archive_dir, error_dir)
+
+
 def main():
     fire.Fire()
 

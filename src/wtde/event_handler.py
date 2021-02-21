@@ -64,5 +64,11 @@ class EventHandler(watchdog.events.FileSystemEventHandler):
 
         # TODO validate that filetypes are of images
         # TODO ignore non-image files
-
-        return Ok(wtde.ReadyDir(files=dir_files, directory=changed_dir, archive_dir=archive_dir, error_dir=error_dir))
+        rd = wtde.ReadyDir(
+            files=dir_files,
+            directory=changed_dir,
+            archive_dir=archive_dir,
+            error_dir=error_dir,
+            play_dt=None,
+            remove_srcdir=False)
+        return Ok(rd)

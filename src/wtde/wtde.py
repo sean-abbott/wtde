@@ -1,3 +1,4 @@
+import imghdr
 import os
 import re
 import shutil
@@ -42,6 +43,7 @@ TEMPLATE_THRESHOLDS = {
 }
 
 GAMECATEGORY = Enum('GAMECATEGORY', 'ground air naval')
+DT_FORMAT_STR = '%Y%m%d%H%M'
 
 class ResultSet(NamedTuple):
     """Ongoing results built over the chain"""
@@ -57,6 +59,17 @@ class ResultSet(NamedTuple):
     category: GAMECATEGORY # the category the of the mission
     game_map: str # the map name
     dt: str # TODO make datetime the date and approximate time of the mission
+    remove_srcdir: bool # whether to remove the srcdir when archiving. used when retrying errors
+
+class ReadyDir(NamedTuple):
+    """Datastructure with all components needed to scrape scores"""
+
+    files: list # files should be a list with 3 or more files in the watched directory
+    directory: str # the watched directory. May consider a pathlib.Path at some point
+    archive_dir: str # the directory to archive files to, when we have processed them
+    error_dir: str # a directory to store errored sets that we couldn't figure out (yet)
+    play_dt: dt # a datetime for when this match was played. Optional
+    remove_srcdir: bool # whether to remove the srcdir when archiving. used when retrying errors
 
 # TODO this is ugly AF. Find a better way
 def update_result(
@@ -72,7 +85,8 @@ def update_result(
         battle_message_image=None,
         category=None,
         game_map=None,
-        dt=None
+        dt=None,
+        remove_srcdir=False
 ):
     if r is None:
         r = ResultSet(
@@ -87,7 +101,8 @@ def update_result(
            battle_message_image=None,
            category=None,
            game_map=None,
-           dt=None)
+           dt=None,
+           remove_srcdir=False)
     return ResultSet(
         src_dir = src_dir or r.src_dir,
         archive_dir = archive_dir or r.archive_dir,
@@ -100,7 +115,8 @@ def update_result(
         battle_message_image = battle_message_image or r.battle_message_image,
         category = category or r.category,
         game_map = game_map or r.game_map,
-        dt = dt or r.dt)
+        dt = dt or r.dt,
+        remove_srcdir = remove_srcdir or r.remove_srcdir)
 
 
 def base_image(path, dualscreen=IS_DUALSCREEN):
@@ -527,11 +543,15 @@ def handle_ready_files(ready_dir):
         archive_error(ready_dir, worked)
         return
 
+# TODO I just rewrote this down in get_error_dirs, so they need to be unified
 def init_result_set(ready_dir):
     """Convert the ReadyDir into a partially populated ResultSet
 
     Positional Arguments:
     ready_dir -- a (validated) ReadyDir with a list of files to process
+
+    Keyword Arguments:
+    remove_srcdir -- whether the srcdir should be removed on archive
 
     Returns:
     Ok or Err -- an Ok wrapping ResultSet with src_dir,archive_ir,error_dir,file_list,dt set, or Err
@@ -542,13 +562,17 @@ def init_result_set(ready_dir):
     r = None
     try:
         first_file = os.path.join(ready_dir.directory, ready_dir.files[0])
-        set_dt = dt.fromtimestamp(os.stat(first_file).st_mtime).strftime('%Y%m%d%H%M')
+        if ready_dir.play_dt is not None:
+            set_dt = dt.fromtimestamp(os.stat(first_file).st_mtime).strftime(DT_FORMAT_STR)
+        else:
+            set_dt = ready_dir.play_dt
         r = update_result(
             src_dir=ready_dir.directory,
             archive_dir=ready_dir.archive_dir,
             error_dir=ready_dir.error_dir,
             file_list=ready_dir.files,
-            dt=set_dt)
+            dt=set_dt,
+            remove_srcdir=ready_dir.remove_srcdir)
     except Exception as e:
         return Err(e)
 
@@ -658,12 +682,11 @@ def archive_set(result_set):
     Error:
     will raise any errors
     """
-    print('Archiving results!')
     set_name = dir_name_normalize('{}-{}-{}'.format(result_set.dt, result_set.category.name, result_set.game_map))
     set_dir = result_set.set_dir or os.path.join(
             result_set.archive_dir,
             set_name)
-    print(set_dir)
+    print('Archiving results to {}'.format(set_dir))
     try:
         os.makedirs(set_dir)
     except FileExistsError:
@@ -673,6 +696,9 @@ def archive_set(result_set):
             dest = os.path.join(set_dir, file)
             print('moving {} to {}'.format(src, dest))
             shutil.move(src, dest)
+    if result_set.remove_srcdir:
+        print('Removing {}'.format(result_set.src_dir))
+        shutil.rmtree(result_set.src_dir)
     return Ok()
 
 def dir_name_normalize(s):
@@ -700,7 +726,7 @@ def archive_error(ready_dir, err):
     print('archive_error called because {}'.format(err.value))
     first_file = os.path.join(ready_dir.directory, ready_dir.files[0])
 
-    approx_time = dt.fromtimestamp(os.stat(first_file).st_mtime).strftime('%Y%m%d%H%M')
+    approx_time = dt.fromtimestamp(os.stat(first_file).st_mtime).strftime(DT_FORMAT_STR)
     set_dir = os.path.join(ready_dir.error_dir, approx_time)
     try:
         os.makedirs(set_dir)
@@ -712,3 +738,187 @@ def archive_error(ready_dir, err):
         shutil.move(src, dest)
     with open(os.path.join(set_dir, 'why'), 'w') as f:
         f.write(str(err.value))
+
+def retry_errors(archive_dir, error_dir):
+    """Retry errored directories and archive any successes
+
+    Positional Arguments:
+    archive_dir -- The directory to archive any successful retries to
+    error_dir -- The directory error directories are in
+
+    Returns:
+    Result with a success or failure message
+
+    Errors:
+    ValueError if no error directories are found
+
+    Side Effects:
+    Will create archive_dir if it does not exist
+    """
+    r = get_error_dirs(error_dir, archive_dir)
+    if r.is_ok():
+        rd_list = r.unwrap()
+    else:
+        print('Failed to get initial directories: {}'.format(r.err()))
+        return
+    worked = utils.railroad(
+        init_each_dir,
+        get_images_from_all,
+        get_results_from_all,
+        archive_all,
+        init_arg=rd_list)
+    if worked.is_ok():
+        print('Some success in retrying errors!')
+    else:
+        print('No successes in retrying errors: {}'.format(worked.err()))
+
+# TODO all these "loop for a result set functions are gonna be the same
+# unify them
+def get_images_from_all(rs_list):
+    """Run get_images on all result sets and return any successful ones
+
+    Positional Arguments:
+    rs_list -- [ResultSet]
+
+    Returns:
+    Result -- Ok([ResultSet]) or Err([errors]) if we have no successes
+    """
+    new_rs_list = []
+    error_list = []
+    for rs in rs_list:
+        r = get_images_list(rs)
+        if r.is_ok():
+            new_rs_list.append(r.unwrap())
+        else:
+            error_list.append(r.err())
+    if len(new_rs_list) > 0:
+        return Ok(new_rs_list)
+    else:
+        final_error_list = ["get_images_from_all did not have any successes."] + error_list
+        return Err(final_error_list)
+
+def get_results_from_all(rs_list):
+    """Run get_results on all result sets and return any successful ones
+
+    Positional Arguments:
+    rs_list -- [ResultSet]
+
+    Returns:
+    Result -- Ok([ResultSet]) or Err([errors]) if we have no successes
+    """
+    new_rs_list = []
+    error_list = []
+    for rs in rs_list:
+        r = get_result_set(rs)
+        if r.is_ok():
+            new_rs_list.append(r.unwrap())
+        else:
+            error_list.append(r.err())
+
+    if len(new_rs_list) > 0:
+        return Ok(new_rs_list)
+    else:
+        final_error_list = ["get_results_from_all did not have any successes."] + error_list
+        return Err(final_error_list)
+
+def archive_all(rs_list):
+    """Archive all resultsets
+
+    Positional Arguments:
+    rs_list -- [ResultSet]
+
+    Returns:
+    Result -- Ok([ResultSet]) or Err([errors]) if we have no successes
+    """
+    new_rs_list = []
+    error_list = []
+    for rs in rs_list:
+        r = archive_set(rs)
+        if r.is_ok():
+            new_rs_list.append(r.unwrap())
+        else:
+            error_list.append(r.err())
+
+    if len(new_rs_list) > 0:
+        return Ok(new_rs_list)
+    else:
+        final_error_list = ["archive_all did not have any successes."] + error_list
+        return Err(final_error_list)
+
+
+def init_each_dir(readydir_list):
+    """Take a list of ReadyDirs representing possible ResultSets and return ResultSets
+
+    Positional Arguments:
+    readydir_list -- a list of readydirs to convert to resultsets
+
+    Returns:
+    Result -- Ok[ResultSet] or Err
+    """
+    resultset_list = []
+    error_list = []
+    for rd in readydir_list:
+        r = init_result_set(rd)
+        if r.is_ok():
+            resultset_list.append(r.unwrap())
+        else:
+            error_list.append(r.err())
+    if len(resultset_list) > 0:
+        return Ok(resultset_list)
+
+    return Err(error_list)
+
+def get_error_dirs(error_dir, archive_dir):
+    """Retrieve a list of subdirectories that meet the error dir criteria
+
+    Error formatted directories are simply a DT_FORMAT_STR datetime
+
+    Positional Arguments:
+    error_dir -- string to the directory to look in
+    archive_dir -- string path of the directory to archive succes to, used to construct ReadyDirs
+
+    Returns:
+    Result -- Ok([wtde.ReadyDir]), Err() if no directories found
+    """
+    sub_dirs = []
+    error_dirs = []
+    fail_list = []
+    try:
+        sub_dirs = os.listdir(error_dir)
+    except FileNotFoundError:
+        pass
+
+    for sd in sub_dirs:
+        d = os.path.join(error_dir, sd)
+        play_dt = None
+        try:
+            play_dt = dt.strptime(sd, DT_FORMAT_STR)
+        except ValueError as e:
+            if 'does not match format' in str(e) or 'unconverted data remains' in str(e):
+                print('Directory {} name not in error format, skipping'.format(sd))
+                pass
+            else:
+                fail_list.append(e)
+                pass
+
+        # check to make sure we have at least 3 images in the given directory
+        image_file_list = [f for f in os.listdir(d) if imghdr.what(os.path.join(d, f))]
+        if len(image_file_list) < 3:
+            print('There are less than 3 images in {}. Skipping.'.format(d))
+            continue
+
+        # we have enough images in a directory we expected.
+        rd = ReadyDir(
+            files=image_file_list,
+            directory=d,
+            archive_dir=archive_dir,
+            error_dir=error_dir,
+            play_dt=play_dt,
+            remove_srcdir=True)
+
+        error_dirs.append(rd)
+
+    if len(error_dirs) == 0:
+        return Err(fail_list)
+    return Ok(error_dirs)
+
