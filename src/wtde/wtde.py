@@ -562,7 +562,8 @@ def init_result_set(ready_dir):
     r = None
     try:
         first_file = os.path.join(ready_dir.directory, ready_dir.files[0])
-        if ready_dir.play_dt is not None:
+        print(ready_dir)
+        if ready_dir.play_dt is None:
             set_dt = dt.fromtimestamp(os.stat(first_file).st_mtime).strftime(DT_FORMAT_STR)
         else:
             set_dt = ready_dir.play_dt
